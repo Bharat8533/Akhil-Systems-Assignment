@@ -1,47 +1,32 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://akhil-systems-assignment.onrender.com/api';
 
-async function request(endpoint, options = {}) {
-  const controller = new AbortController();
-  const timerId = setTimeout(() => controller.abort(), 10000);
+async function api(path, options = {}) {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
 
-  try {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-      signal: controller.signal,
-    });
-    clearTimeout(timerId);
+  const json = await res.json().catch(() => ({}));
 
-    const json = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      const msg = json.message
-        || (json.errors && json.errors.map(e => e.message).join(', '))
-        || `Request failed (${res.status})`;
-      throw new Error(msg);
-    }
-
-    return json;
-  } catch (err) {
-    clearTimeout(timerId);
-    if (err.name === 'AbortError') throw new Error('Request timed out. Please check if the server is running.');
-    throw err;
+  if (!res.ok) {
+    const errorMsg = json.message || (json.errors && json.errors[0]?.message) || `Request failed with status ${res.status}`;
+    throw new Error(errorMsg);
   }
+
+  return json;
 }
 
-function normalizePatient(p) {
+const formatPatient = (p) => {
   if (!p) return null;
-
-  const allergiesStr = Array.isArray(p.allergies)
-    ? (p.allergies.join(', ') || 'None reported')
-    : (p.allergies || 'None reported');
-
   return {
     id: p.patientId || p._id,
     _id: p._id,
     fullName: p.fullName,
-    dob: p.dateOfBirth ? new Date(p.dateOfBirth).toISOString().slice(0, 10) : '',
-    age: p.age ?? null,
+    dob: p.dateOfBirth ? p.dateOfBirth.slice(0, 10) : '',
+    age: p.age ?? '',
     gender: p.gender,
     phone: p.phone,
     email: p.email || '',
@@ -50,20 +35,16 @@ function normalizePatient(p) {
     emergencyContact: p.emergencyContact || {},
     emergencyContactName: p.emergencyContact?.name || '',
     emergencyContactPhone: p.emergencyContact?.phone || '',
-    allergies: allergiesStr,
+    allergies: Array.isArray(p.allergies) ? p.allergies.join(', ') : (p.allergies || 'None reported'),
     medicalNotes: p.notes || '',
     registeredAt: p.registrationDate || p.createdAt,
     isActive: p.isActive !== false,
   };
-}
+};
 
-function normalizeDoctor(d) {
+const formatDoctor = (d) => {
   if (!d) return null;
-
-  const workingDays = (d.workingHours || []).map(wh => wh.day);
-  const starts = (d.workingHours || []).map(wh => wh.start).sort();
-  const ends = (d.workingHours || []).map(wh => wh.end).sort();
-
+  const hours = d.workingHours || [];
   return {
     id: d.doctorId || d._id,
     _id: d._id,
@@ -73,206 +54,174 @@ function normalizeDoctor(d) {
     qualification: d.qualification || d.specialization,
     phone: d.phone || '',
     email: d.email || '',
-    avatar: d.avatar || d.image || 'https://i.pinimg.com/1200x/59/19/8e/59198e7d74109231340e7b0d28b1bba7.jpg',
+    avatar: d.avatar || 'https://i.pinimg.com/1200x/59/19/8e/59198e7d74109231340e7b0d28b1bba7.jpg',
     consultationDuration: d.consultationDuration || 30,
     isActive: d.isActive !== false,
     roomNo: d.roomNo || '',
-    experience: d.experience || '',
     leaveDates: d.leaveDates || [],
-    workingDays,
+    workingDays: hours.map(h => h.day),
     workingHours: {
-      start: starts[0] || '09:00',
-      end: ends[ends.length - 1] || '17:00',
+      start: hours[0]?.start || '09:00',
+      end: hours[0]?.end || '17:00',
     },
-    workingHoursArray: d.workingHours || [],
-    breakPeriods: (d.breakPeriods || []).map(bp => ({
-      start: bp.start,
-      end: bp.end,
-      label: bp.label || 'Break',
-    })),
+    workingHoursArray: hours,
+    breakPeriods: d.breakPeriods || [],
   };
-}
+};
 
-function normalizeAppointment(apt) {
-  if (!apt) return null;
-
-  const dateObj = apt.appointmentDate ? new Date(apt.appointmentDate) : null;
-  const dateStr = dateObj
-    ? `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`
-    : '';
-  const timeSlot = dateObj
-    ? `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`
-    : '';
-
-  const patient = typeof apt.patient === 'object' && apt.patient ? apt.patient : {};
-  const doctor = typeof apt.doctor === 'object' && apt.doctor ? apt.doctor : {};
+const formatAppointment = (a) => {
+  if (!a) return null;
+  const dateObj = a.appointmentDate ? new Date(a.appointmentDate) : null;
+  const patient = typeof a.patient === 'object' && a.patient ? a.patient : {};
+  const doctor = typeof a.doctor === 'object' && a.doctor ? a.doctor : {};
 
   return {
-    id: apt.appointmentId || apt._id,
-    _id: apt._id,
+    id: a.appointmentId || a._id,
+    _id: a._id,
     patientId: patient.patientId || '',
     patientName: patient.fullName || '',
     patientPhone: patient.phone || '',
     doctorId: doctor.doctorId || '',
     doctorName: doctor.name || '',
-    department: doctor.department || apt.department || '',
-    date: dateStr,
-    timeSlot,
-    appointmentType: apt.appointmentType,
-    reason: apt.reason || '',
-    status: apt.status,
-    cancelReason: apt.cancelReason || '',
-    cancelledAt: apt.cancelledAt || null,
-    createdAt: apt.createdAt,
+    department: doctor.department || a.department || '',
+    date: dateObj ? dateObj.toISOString().slice(0, 10) : '',
+    timeSlot: dateObj ? `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}` : '',
+    appointmentType: a.appointmentType,
+    reason: a.reason || '',
+    status: a.status,
+    cancelReason: a.cancelReason || '',
+    cancelledAt: a.cancelledAt,
+    createdAt: a.createdAt,
   };
-}
+};
 
-function normalizeAvailability(data, duration = 30) {
+const formatAvailability = (data, duration = 30) => {
   if (!data) return null;
 
-  const { available = [], booked = [], reason } = data;
-
-  if (reason) {
-    const r = reason.toLowerCase();
-    if (r.includes('leave')) return { status: 'on_leave', message: reason, slots: [], summary: { available: 0, booked: 0 } };
-    if (r.includes('inactive')) return { status: 'inactive', message: reason, slots: [], summary: { available: 0, booked: 0 } };
-    if (r.includes('not work') || r.includes('does not work')) return { status: 'off_duty', message: reason, slots: [], summary: { available: 0, booked: 0 } };
-    return { status: 'off_duty', message: reason, slots: [], summary: { available: 0, booked: 0 } };
+  if (data.reason) {
+    const reason = data.reason.toLowerCase();
+    const status = reason.includes('leave') ? 'on_leave' : reason.includes('inactive') ? 'inactive' : 'off_duty';
+    return { status, message: data.reason, slots: [], summary: { available: 0, booked: 0 } };
   }
 
-  const isoToHHMM = iso => {
+  const getTime = (iso) => {
     const d = new Date(iso);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
-  const period = hhmm => {
-    const h = parseInt(hhmm, 10);
+  const getPeriod = (time) => {
+    const h = parseInt(time, 10);
     return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
   };
 
-  const availSlots = available.map(iso => {
-    const time = isoToHHMM(iso);
-    return { time, state: 'available', period: period(time), duration };
-  });
-  const bookedSlots = booked.map(iso => {
-    const time = isoToHHMM(iso);
-    return { time, state: 'booked', period: period(time), duration };
+  const available = (data.available || []).map(iso => {
+    const time = getTime(iso);
+    return { time, state: 'available', period: getPeriod(time), duration };
   });
 
-  const slots = [...availSlots, ...bookedSlots].sort((a, b) => a.time.localeCompare(b.time));
+  const booked = (data.booked || []).map(iso => {
+    const time = getTime(iso);
+    return { time, state: 'booked', period: getPeriod(time), duration };
+  });
 
   return {
-    slots,
-    summary: { available: availSlots.length, booked: bookedSlots.length },
+    slots: [...available, ...booked].sort((a, b) => a.time.localeCompare(b.time)),
+    summary: { available: available.length, booked: booked.length },
   };
-}
+};
 
-function toBackendPatient(f) {
-  return {
-    fullName: f.fullName?.trim(),
-    dateOfBirth: f.dob,
-    gender: f.gender,
-    phone: f.phone?.trim(),
-    address: f.address?.trim(),
-    email: f.email?.trim() || undefined,
-    bloodGroup: f.bloodGroup || undefined,
-    emergencyContact: (f.emergencyContactName || f.emergencyContact?.name) ? {
-      name: (f.emergencyContactName || f.emergencyContact?.name)?.trim(),
-      phone: (f.emergencyContactPhone || f.emergencyContact?.phone)?.trim(),
-    } : undefined,
-    allergies: f.allergies && f.allergies !== 'None reported'
-      ? f.allergies.split(',').map(a => a.trim()).filter(Boolean)
-      : [],
-    notes: f.medicalNotes?.trim() || undefined,
-  };
-}
-
-function toBackendAppointment(f) {
-  let appointmentDate = null;
-  if (f.date && f.timeSlot) {
-    const [h, m] = f.timeSlot.split(':').map(Number);
-    const [y, mo, d] = f.date.split('-').map(Number);
-    appointmentDate = new Date(y, mo - 1, d, h, m, 0, 0).toISOString();
-  }
-  return {
-    patientId: f.patientId,
-    doctorId: f.doctorId,
-    appointmentDate,
-    appointmentType: f.appointmentType,
-    reason: f.reason,
-  };
-}
+const preparePatientPayload = (data) => ({
+  fullName: data.fullName?.trim(),
+  dateOfBirth: data.dob,
+  gender: data.gender,
+  phone: data.phone?.trim(),
+  address: data.address?.trim(),
+  email: data.email?.trim() || undefined,
+  bloodGroup: data.bloodGroup || undefined,
+  emergencyContact: (data.emergencyContactName || data.emergencyContact?.name) ? {
+    name: (data.emergencyContactName || data.emergencyContact?.name)?.trim(),
+    phone: (data.emergencyContactPhone || data.emergencyContact?.phone)?.trim(),
+  } : undefined,
+  allergies: data.allergies && data.allergies !== 'None reported'
+    ? data.allergies.split(',').map(a => a.trim()).filter(Boolean)
+    : [],
+  notes: data.medicalNotes?.trim() || undefined,
+});
 
 export const patientService = {
-  async getAll(query = '') {
-    const qs = query ? `?search=${encodeURIComponent(query)}&limit=500` : '?limit=500';
-    const res = await request(`/patients${qs}`);
-    return (res.data || []).map(normalizePatient);
+  async getAll(search = '') {
+    const query = search ? `?search=${encodeURIComponent(search)}&limit=500` : '?limit=500';
+    const res = await api(`/patients${query}`);
+    return (res.data || []).map(formatPatient);
   },
 
   async getById(id) {
-    const res = await request(`/patients/${id}`);
-    return normalizePatient(res.data);
+    const res = await api(`/patients/${id}`);
+    return formatPatient(res.data);
   },
 
   async create(patientData) {
-    const res = await request('/patients', {
+    const res = await api('/patients', {
       method: 'POST',
-      body: JSON.stringify(toBackendPatient(patientData)),
+      body: JSON.stringify(preparePatientPayload(patientData)),
     });
-    return normalizePatient(res.data);
+    return formatPatient(res.data);
   },
 
   async update(id, updates) {
-    const res = await request(`/patients/${id}`, {
+    const res = await api(`/patients/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(toBackendPatient(updates)),
+      body: JSON.stringify(preparePatientPayload(updates)),
     });
-    return normalizePatient(res.data);
+    return formatPatient(res.data);
   },
 };
 
 export const doctorService = {
   async getAll() {
-    const res = await request('/doctors?limit=100&isActive=true');
-    return (res.data || []).map(normalizeDoctor);
+    const res = await api('/doctors?limit=100&isActive=true');
+    return (res.data || []).map(formatDoctor);
   },
 
-  async getAvailability(doctorId, dateString) {
-    const res = await request(`/doctors/${doctorId}/availability?date=${dateString}`);
-    const data = res.data;
-    const duration = data?.doctor?.consultationDuration || 30;
-    return normalizeAvailability(data, duration);
+  async getAvailability(doctorId, date) {
+    const res = await api(`/doctors/${doctorId}/availability?date=${date}`);
+    return formatAvailability(res.data, res.data?.doctor?.consultationDuration || 30);
   },
 };
 
 export const appointmentService = {
   async getAll(filters = {}) {
-    const p = new URLSearchParams({ limit: '500' });
-    if (filters.date) p.append('date', filters.date);
-    if (filters.doctorId && filters.doctorId !== 'all') p.append('doctorId', filters.doctorId);
-    if (filters.department && filters.department !== 'all') p.append('department', filters.department);
-    if (filters.status && filters.status !== 'all') p.append('status', filters.status);
-    if (filters.search) p.append('search', filters.search);
+    const params = new URLSearchParams({ limit: '500' });
+    if (filters.date) params.append('date', filters.date);
+    if (filters.doctorId && filters.doctorId !== 'all') params.append('doctorId', filters.doctorId);
+    if (filters.department && filters.department !== 'all') params.append('department', filters.department);
+    if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+    if (filters.search) params.append('search', filters.search);
 
-    const res = await request(`/appointments?${p}`);
-    return (res.data || []).map(normalizeAppointment);
+    const res = await api(`/appointments?${params}`);
+    return (res.data || []).map(formatAppointment);
   },
 
-  async create(appointmentData) {
-    const res = await request('/appointments', {
+  async create({ patientId, doctorId, date, timeSlot, appointmentType, reason }) {
+    let appointmentDate = null;
+    if (date && timeSlot) {
+      const [h, m] = timeSlot.split(':').map(Number);
+      const [y, mo, d] = date.split('-').map(Number);
+      appointmentDate = new Date(y, mo - 1, d, h, m, 0, 0).toISOString();
+    }
+    const res = await api('/appointments', {
       method: 'POST',
-      body: JSON.stringify(toBackendAppointment(appointmentData)),
+      body: JSON.stringify({ patientId, doctorId, appointmentDate, appointmentType, reason }),
     });
-    return normalizeAppointment(res.data);
+    return formatAppointment(res.data);
   },
 
-  async cancel(id, cancelReason = 'Cancelled by reception') {
-    const res = await request(`/appointments/${id}/cancel`, {
+  async cancel(id, reason = 'Cancelled by reception') {
+    const res = await api(`/appointments/${id}/cancel`, {
       method: 'PATCH',
-      body: JSON.stringify({ reason: cancelReason }),
+      body: JSON.stringify({ reason }),
     });
-    return normalizeAppointment(res.data);
+    return formatAppointment(res.data);
   },
 
   async reschedule(id, { newDate, newTimeSlot, reason = 'Rescheduled by reception' }) {
@@ -282,22 +231,22 @@ export const appointmentService = {
       const [y, mo, d] = newDate.split('-').map(Number);
       newDateISO = new Date(y, mo - 1, d, h, m, 0, 0).toISOString();
     }
-    const res = await request(`/appointments/${id}/reschedule`, {
+    const res = await api(`/appointments/${id}/reschedule`, {
       method: 'PATCH',
       body: JSON.stringify({ newDate: newDateISO, reason }),
     });
-    return normalizeAppointment(res.data);
+    return formatAppointment(res.data);
   },
 
   async complete(id) {
-    const res = await request(`/appointments/${id}/complete`, { method: 'PATCH' });
-    return normalizeAppointment(res.data);
+    const res = await api(`/appointments/${id}/complete`, { method: 'PATCH' });
+    return formatAppointment(res.data);
   },
 };
 
 export const dashboardService = {
   async getSummary() {
-    const res = await request('/dashboard');
+    const res = await api('/dashboard');
     return res.data;
   },
 };
