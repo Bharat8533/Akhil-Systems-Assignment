@@ -12,25 +12,27 @@ async function api(path, options = {}) {
   const json = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    const errorMsg = json.message || (json.errors && json.errors[0]?.message) || `Request failed with status ${res.status}`;
-    throw new Error(errorMsg);
+    throw new Error(json.message || json.errors?.[0]?.message || `Request failed (${res.status})`);
   }
 
   return json;
 }
 
+const toISODate = (date, timeSlot) => {
+  if (!date || !timeSlot) return null;
+  const [h, m] = timeSlot.split(':').map(Number);
+  const [y, mo, d] = date.split('-').map(Number);
+  return new Date(y, mo - 1, d, h, m, 0, 0).toISOString();
+};
+
 const formatPatient = (p) => {
   if (!p) return null;
   return {
+    ...p,
     id: p.patientId || p._id,
-    _id: p._id,
-    fullName: p.fullName,
     dob: p.dateOfBirth ? p.dateOfBirth.slice(0, 10) : '',
     age: p.age ?? '',
-    gender: p.gender,
-    phone: p.phone,
     email: p.email || '',
-    address: p.address,
     bloodGroup: p.bloodGroup || '',
     emergencyContact: p.emergencyContact || {},
     emergencyContactName: p.emergencyContact?.name || '',
@@ -46,19 +48,14 @@ const formatDoctor = (d) => {
   if (!d) return null;
   const hours = d.workingHours || [];
   return {
+    ...d,
     id: d.doctorId || d._id,
-    _id: d._id,
-    name: d.name,
-    specialization: d.specialization,
-    department: d.department,
     qualification: d.qualification || d.specialization,
     phone: d.phone || '',
     email: d.email || '',
     avatar: d.avatar || 'https://i.pinimg.com/1200x/59/19/8e/59198e7d74109231340e7b0d28b1bba7.jpg',
     consultationDuration: d.consultationDuration || 30,
     isActive: d.isActive !== false,
-    roomNo: d.roomNo || '',
-    leaveDates: d.leaveDates || [],
     workingDays: hours.map(h => h.day),
     workingHours: {
       start: hours[0]?.start || '09:00',
@@ -66,32 +63,27 @@ const formatDoctor = (d) => {
     },
     workingHoursArray: hours,
     breakPeriods: d.breakPeriods || [],
+    leaveDates: d.leaveDates || [],
   };
 };
 
 const formatAppointment = (a) => {
   if (!a) return null;
-  const dateObj = a.appointmentDate ? new Date(a.appointmentDate) : null;
+  const d = a.appointmentDate ? new Date(a.appointmentDate) : null;
   const patient = typeof a.patient === 'object' && a.patient ? a.patient : {};
   const doctor = typeof a.doctor === 'object' && a.doctor ? a.doctor : {};
 
   return {
+    ...a,
     id: a.appointmentId || a._id,
-    _id: a._id,
-    patientId: patient.patientId || '',
-    patientName: patient.fullName || '',
+    patientId: patient.patientId || a.patientId || '',
+    patientName: patient.fullName || a.patientName || '',
     patientPhone: patient.phone || '',
-    doctorId: doctor.doctorId || '',
-    doctorName: doctor.name || '',
+    doctorId: doctor.doctorId || a.doctorId || '',
+    doctorName: doctor.name || a.doctorName || '',
     department: doctor.department || a.department || '',
-    date: dateObj ? dateObj.toISOString().slice(0, 10) : '',
-    timeSlot: dateObj ? `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}` : '',
-    appointmentType: a.appointmentType,
-    reason: a.reason || '',
-    status: a.status,
-    cancelReason: a.cancelReason || '',
-    cancelledAt: a.cancelledAt,
-    createdAt: a.createdAt,
+    date: d ? d.toISOString().slice(0, 10) : '',
+    timeSlot: d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '',
   };
 };
 
@@ -99,8 +91,8 @@ const formatAvailability = (data, duration = 30) => {
   if (!data) return null;
 
   if (data.reason) {
-    const reason = data.reason.toLowerCase();
-    const status = reason.includes('leave') ? 'on_leave' : reason.includes('inactive') ? 'inactive' : 'off_duty';
+    const r = data.reason.toLowerCase();
+    const status = r.includes('leave') ? 'on_leave' : r.includes('inactive') ? 'inactive' : 'off_duty';
     return { status, message: data.reason, slots: [], summary: { available: 0, booked: 0 } };
   }
 
@@ -114,15 +106,14 @@ const formatAvailability = (data, duration = 30) => {
     return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
   };
 
-  const available = (data.available || []).map(iso => {
-    const time = getTime(iso);
-    return { time, state: 'available', period: getPeriod(time), duration };
-  });
+  const mapSlots = (list, state) =>
+    (list || []).map(iso => {
+      const time = getTime(iso);
+      return { time, state, period: getPeriod(time), duration };
+    });
 
-  const booked = (data.booked || []).map(iso => {
-    const time = getTime(iso);
-    return { time, state: 'booked', period: getPeriod(time), duration };
-  });
+  const available = mapSlots(data.available, 'available');
+  const booked = mapSlots(data.booked, 'booked');
 
   return {
     slots: [...available, ...booked].sort((a, b) => a.time.localeCompare(b.time)),
@@ -149,48 +140,48 @@ const preparePatientPayload = (data) => ({
 });
 
 export const patientService = {
-  async getAll(search = '') {
+  getAll: async (search = '') => {
     const query = search ? `?search=${encodeURIComponent(search)}&limit=500` : '?limit=500';
     const res = await api(`/patients${query}`);
     return (res.data || []).map(formatPatient);
   },
 
-  async getById(id) {
+  getById: async (id) => {
     const res = await api(`/patients/${id}`);
     return formatPatient(res.data);
   },
 
-  async create(patientData) {
+  create: async (data) => {
     const res = await api('/patients', {
       method: 'POST',
-      body: JSON.stringify(preparePatientPayload(patientData)),
+      body: JSON.stringify(preparePatientPayload(data)),
     });
     return formatPatient(res.data);
   },
 
-  async update(id, updates) {
+  update: async (id, data) => {
     const res = await api(`/patients/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(preparePatientPayload(updates)),
+      body: JSON.stringify(preparePatientPayload(data)),
     });
     return formatPatient(res.data);
   },
 };
 
 export const doctorService = {
-  async getAll() {
+  getAll: async () => {
     const res = await api('/doctors?limit=100&isActive=true');
     return (res.data || []).map(formatDoctor);
   },
 
-  async getAvailability(doctorId, date) {
+  getAvailability: async (doctorId, date) => {
     const res = await api(`/doctors/${doctorId}/availability?date=${date}`);
     return formatAvailability(res.data, res.data?.doctor?.consultationDuration || 30);
   },
 };
 
 export const appointmentService = {
-  async getAll(filters = {}) {
+  getAll: async (filters = {}) => {
     const params = new URLSearchParams({ limit: '500' });
     if (filters.date) params.append('date', filters.date);
     if (filters.doctorId && filters.doctorId !== 'all') params.append('doctorId', filters.doctorId);
@@ -202,21 +193,21 @@ export const appointmentService = {
     return (res.data || []).map(formatAppointment);
   },
 
-  async create({ patientId, doctorId, date, timeSlot, appointmentType, reason }) {
-    let appointmentDate = null;
-    if (date && timeSlot) {
-      const [h, m] = timeSlot.split(':').map(Number);
-      const [y, mo, d] = date.split('-').map(Number);
-      appointmentDate = new Date(y, mo - 1, d, h, m, 0, 0).toISOString();
-    }
+  create: async ({ patientId, doctorId, date, timeSlot, appointmentType, reason }) => {
     const res = await api('/appointments', {
       method: 'POST',
-      body: JSON.stringify({ patientId, doctorId, appointmentDate, appointmentType, reason }),
+      body: JSON.stringify({
+        patientId,
+        doctorId,
+        appointmentDate: toISODate(date, timeSlot),
+        appointmentType,
+        reason,
+      }),
     });
     return formatAppointment(res.data);
   },
 
-  async cancel(id, reason = 'Cancelled by reception') {
+  cancel: async (id, reason = 'Cancelled by reception') => {
     const res = await api(`/appointments/${id}/cancel`, {
       method: 'PATCH',
       body: JSON.stringify({ reason }),
@@ -224,28 +215,25 @@ export const appointmentService = {
     return formatAppointment(res.data);
   },
 
-  async reschedule(id, { newDate, newTimeSlot, reason = 'Rescheduled by reception' }) {
-    let newDateISO = null;
-    if (newDate && newTimeSlot) {
-      const [h, m] = newTimeSlot.split(':').map(Number);
-      const [y, mo, d] = newDate.split('-').map(Number);
-      newDateISO = new Date(y, mo - 1, d, h, m, 0, 0).toISOString();
-    }
+  reschedule: async (id, { newDate, newTimeSlot, reason = 'Rescheduled by reception' }) => {
     const res = await api(`/appointments/${id}/reschedule`, {
       method: 'PATCH',
-      body: JSON.stringify({ newDate: newDateISO, reason }),
+      body: JSON.stringify({
+        newDate: toISODate(newDate, newTimeSlot),
+        reason,
+      }),
     });
     return formatAppointment(res.data);
   },
 
-  async complete(id) {
+  complete: async (id) => {
     const res = await api(`/appointments/${id}/complete`, { method: 'PATCH' });
     return formatAppointment(res.data);
   },
 };
 
 export const dashboardService = {
-  async getSummary() {
+  getSummary: async () => {
     const res = await api('/dashboard');
     return res.data;
   },
