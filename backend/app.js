@@ -21,6 +21,20 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true }));
 
+app.get('/', (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'QuickCare EHR API',
+    health: '/health',
+    endpoints: {
+      patients: '/api/patients',
+      doctors: '/api/doctors',
+      appointments: '/api/appointments',
+      dashboard: '/api/dashboard',
+    },
+  });
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });

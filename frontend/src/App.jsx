@@ -161,7 +161,7 @@ function HospitalAppContent() {
         </div>
         <h2 className="text-base font-bold text-slate-900 mb-1">Cannot connect to backend server</h2>
         <p className="text-xs text-slate-500 max-w-sm mb-4">
-          Ensure the Node/Express backend is running on <code className="bg-slate-100 px-1 py-0.5 rounded font-mono">http://localhost:5000</code>.
+          Unable to reach the QuickCare API service. Please check your connection and retry.
         </p>
         <button
           onClick={() => {

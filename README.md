@@ -1,7 +1,8 @@
 # QuickCare EHR — Hospital Patient Registration & Appointment Management System
 
 > **Hospital Patient Registration & Appointment Management System**  
-> Built with MongoDB Atlas, Express.js, React.js (Vite + Tailwind CSS), and Node.js.
+> Built with MongoDB Atlas, Express.js, React.js (Vite + Tailwind CSS), and Node.js.  
+> **Live Backend API**: [https://akhil-systems-assignment.onrender.com](https://akhil-systems-assignment.onrender.com) (Health: [/health](https://akhil-systems-assignment.onrender.com/health))
 
 ---
 
